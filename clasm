@@ -1,0 +1,117 @@
+#!/bin/bash
+#
+# clasm is a wrapper around clang for quick assembly and disassembly of
+# multiple architectures from the command line.
+#
+# clasm determines the architecture based on the name it's invoked with.
+#
+# clasm is flexible about using stdin or argv!
+#
+# EXAMPLE
+#
+# clasm --install /path/to/binaries/
+#
+# $ ./clasm-aarch64 mov x0, 0
+#        0:   00 00 80 d2     movz    x0, #0
+#
+# $ cat | ./clasm-aarch64
+# mov x0, 0
+# mov x1, 1
+#       0:   00 00 80 d2     movz    x0, #0
+#       4:   21 00 80 d2     movz    x1, #0x1
+#
+# $ ./clasm-dis-aarch64 0xd2800021
+#       0:   21 00 80 d2     movz    x1, #0x1
+#
+# $ ./clasm-dis-aarch64 000080d2000080d2
+#       0:   00 00 80 d2     movz    x0, #0
+#       4:   00 00 80 d2     movz    x0, #0
+#
+# $ ./clasm-dis-aarch64 1f081fd6
+#       0:    1f 08 1f d6     braaz    x0
+#
+# CLANG NOTES
+#
+# To make llvm tell you what you can pass to -march:
+# $ llvm-objdump --version
+#
+# To make llvm tell you what you can pass to -mpcu and -mattr for arch xyz:
+# llvm-as < /dev/null | llc -march=xyz -mcpu=help
+#
+# Then stick all combinations of all of the above in all the flags until
+# you get what you want because who knows what it wants to see where.
+
+ARCHITECTURES="arm thumb aarch64 x86 x64"
+
+set -e
+
+trap 'rm -f ${TMPFILE} ${DISTMPFILE}' EXIT
+
+if [ "$1" = "--install" ] ; then
+    [ -n "$2" ] && set -- "$1" "${2}/"
+    for arch in ${ARCHITECTURES} ; do
+        ln -sf $0 ${2}clasm-${arch} || true
+        ln -sf $0 ${2}clasm-dis-${arch} || true
+    done
+    exit
+fi
+
+[ -n "$1" ] && { $0 ; exit ; } <<EOM
+$*
+EOM
+
+OBJDUMP=$(type -p llvm-objdump || type -p objdump)
+
+case $0 in
+    *-arm)
+        AFLAGS="-target armv7a-none-linux-android"
+        ODFLAGS=""
+        PREAMBLE="
+.syntax unified
+.arm
+"
+        ;;
+    *-thumb)
+        AFLAGS="-target armv7a-none-linux-android"
+        ODFLAGS="-triple thumb"
+        PREAMBLE="
+.syntax unified
+.thumb
+"
+        ;;
+    *-aarch64)
+        # http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0774b/chr1392305424052.html
+        # https://llvm.org/docs/CommandGuide/llc.html
+        AFLAGS="-target aarch64-arm-none-eabi  -mcpu=cortex-a57+crypto+crc+fp+simd -march=armv8.3a"
+        ODFLAGS="-triple=aarch64-arm-none-eabi -mcpu=cortex-a57 -mattr=+v8.3a"
+        ;;
+    *-x64)
+        AFLAGS="-target x86_64"
+        ;;
+    *)
+        AFLAGS="-target ${0##*-}"
+        ;;
+esac
+
+case $0 in
+    *-dis-*)
+        DISTMPFILE=`mktemp`
+        sed -E 's/0x(..)(..)\b/\2\1/g' |
+        sed -E 's/0x(..)(..)(..)(..)/0x\4\3\2\1/g' |
+        sed -E 's/0x//g' |
+        sed -E 's/[[:space:]]//g' | xxd -r -ps > ${DISTMPFILE}
+        ;;
+esac
+
+TMPFILE=`mktemp`
+(
+cat <<EOM
+${PREAMBLE}
+here:
+EOM
+[ -n "${DISTMPFILE}" ] && echo ".incbin \"${DISTMPFILE}\"" || cat
+) |
+clang -c -x assembler - ${AFLAGS} -o ${TMPFILE}
+${OBJDUMP} ${ODFLAGS} -disassemble-all ${TMPFILE} -j .text | grep -m 1 -A 1000000 '^       0:'
+nm --undefined-only ${TMPFILE}
+[ "$(nm --undefined-only ${TMPFILE})" != "" ] && echo "WARNING: Undefined labels above."
