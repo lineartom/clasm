@@ -97,7 +97,8 @@ case $0 in
     *-dis-*)
         DISTMPFILE=`mktemp`
         sed -E 's/0x(..)(..)\b/\2\1/g' |
-        sed -E 's/0x(..)(..)(..)(..)/0x\4\3\2\1/g' |
+        sed -E 's/0x(..)(..)(..)(..)\b/0x\4\3\2\1/g' |
+        sed -E 's/0x(..)(..)(..)(..)(..)(..)(..)(..)\b/0x\8\7\6\5\4\3\2\1/g' |
         sed -E 's/0x//g' |
         sed -E 's/[[:space:]]//g' | xxd -r -ps > ${DISTMPFILE}
         ;;
