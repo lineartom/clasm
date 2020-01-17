@@ -113,6 +113,6 @@ EOM
 [ -n "${DISTMPFILE}" ] && echo ".incbin \"${DISTMPFILE}\"" || cat
 ) |
 clang -c -x assembler - ${AFLAGS} -o ${TMPFILE}
-${OBJDUMP} ${ODFLAGS} -disassemble-all ${TMPFILE} -j .text | grep -m 1 -A 1000000 '^       0:'
+${OBJDUMP} ${ODFLAGS} -disassemble-all --print-imm-hex ${TMPFILE} -j .text | grep -m 1 -A 1000000 '^       0:'
 nm --undefined-only ${TMPFILE}
 [ "$(nm --undefined-only ${TMPFILE})" != "" ] && echo "WARNING: Undefined labels above."
